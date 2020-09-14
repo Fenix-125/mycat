@@ -9,17 +9,34 @@
 #include <unistd.h> // POSIX header
 
 
-#define BUFFER_SIZE 1'000'000
+#define BUFFER_SIZE     1'000'000
+//#define BUFFER_SIZE     100
+#define HEX_STR_SIZE    4
+
+#define SUCCESS_CODE    0
+#define FAIL_CODE       -1
+
+#define STD_OUT_DECR    1
+#define STD_ERR_DECR    2
 
 namespace po = boost::program_options;
 
 void print_help(const po::options_description &options_description);
 
+ssize_t read_buffer(int fd, char *buffer, ssize_t size, int *status);
+
+int write_buffer(int fd, const char *buffer, ssize_t size, int *status);
+
+unsigned char num_to_hex_char(unsigned char n);
+
+void write_as_hex(char *buf, unsigned char c);
+
 int main(int argc, char **argv) {
     //////////////////////////////////////////////// Local Vars ////////////////////////////////////////////////////////
     std::vector<std::string> file_list;
     bool hex_print;
-    std::unique_ptr<char> buf(new char[BUFFER_SIZE]);
+    std::unique_ptr<char> read_buf(new char[BUFFER_SIZE]);
+    std::unique_ptr<char> write_buf;
     //////////////////////////////////////////////// Local Vars END ////////////////////////////////////////////////////
 
     //////////////////////////////////////////////// Parse Options /////////////////////////////////////////////////////
@@ -48,12 +65,10 @@ int main(int argc, char **argv) {
         return EXIT_FAILURE;
     }
     po::notify(vm);
-
     if (vm.count("help")) {
         print_help(visible);
         return EXIT_SUCCESS;
     }
-
     if (vm.count("file") == 0) {
         std::cerr << "Error: not enough file names given!" << std::endl;
         print_help(visible);
@@ -64,8 +79,8 @@ int main(int argc, char **argv) {
     std::vector<int> file_descriptors(file_list.size());
 
     for (size_t f_index = 0; f_index < file_list.size(); ++f_index) {
-        int f_descr = open(file_list[f_index].c_str(), O_RDONLY);
-        if (f_descr == -1) {
+        file_descriptors[f_index] = open(file_list[f_index].c_str(), O_RDONLY);
+        if (file_descriptors[f_index] == FAIL_CODE) {
             for (size_t i = 0; i < f_index; ++i) {
                 if (close(file_descriptors[i]) == -1) {
                     std::cerr << "Error: can not close file! " << file_list[i] << std::endl;
@@ -76,30 +91,54 @@ int main(int argc, char **argv) {
         }
     }
 
-    for (size_t f_index = 0; f_index < file_descriptors.size(); ++f_index) {
 
-        size_t bytes_read = read(file_descriptors[f_index], buf.get(), BUFFER_SIZE);
-        buf.get()[bytes_read] = 0;
+    int status = 0;
+    ssize_t read_bytes;
+    bool no_io_error = true;
+    int exit_code = EXIT_SUCCESS;
+    ssize_t wr_buf_index, rd_buf_index;
+    if (hex_print) {
+        write_buf.reset(new char[BUFFER_SIZE]);
+    } else {
+        write_buf.reset(read_buf.get()); // TODO: consider change as they are unique pointers
+    }
+    for (size_t f_index = 0; no_io_error && f_index < file_descriptors.size(); ++f_index) {
+        do {
+            read_bytes = read_buffer(file_descriptors[f_index], read_buf.get(), BUFFER_SIZE, &status);
+            if (read_bytes == FAIL_CODE) {
+                std::cerr << "Error: while read form file: " << file_list[f_index] << std::endl;
+                no_io_error = false;
+                exit_code = EXIT_FAILURE;
+                break;
+            }
 
-        std::cout << "File name: " << file_list[f_index] << std::endl;
-        std::cout << "Read count: " << bytes_read << "/200" << std::endl;
-        std::cout << "Buf:\n" << buf.get() << std::endl;
+            if (hex_print) {
+                wr_buf_index = rd_buf_index = 0;
+                for (rd_buf_index = 0; rd_buf_index < read_bytes ; ++rd_buf_index) {
+                    const auto c = read_buf.get()[rd_buf_index];
+                    if (!isspace(static_cast<int>(c)) && !isprint(static_cast<int>(c))) {
+                        write_as_hex(&write_buf.get()[wr_buf_index], c);
+                        wr_buf_index += HEX_STR_SIZE;
+                    } else {
+                        write_buf.get()[wr_buf_index] = c;
+                    }
+                }
+            }
+
+            if (write_buffer(STD_OUT_DECR, write_buf.get(), read_bytes, &status) == FAIL_CODE) {
+                std::cerr << "Error: while try to write to stdout!" << std::endl;
+                no_io_error = false;
+                exit_code = EXIT_FAILURE;
+            }
+        } while (read_bytes == BUFFER_SIZE);
     }
 
-    int exit_code = EXIT_SUCCESS;
     for (size_t f_index = 0; f_index < file_descriptors.size(); ++f_index) {
         if (close(file_descriptors[f_index]) == -1) {
             exit_code = EXIT_FAILURE;
             std::cerr << "Error: can not close file! " << file_list[f_index] << std::endl;
         }
     }
-
-    // Print input params
-//    std::cout << "File List (" << file_list.size() << "):" << std::endl;
-//    for (const auto& el : file_list) {
-//        std::cout << "\t" << el << std::endl;
-//    }
-//    std::cout << "\nhex_print\t: " << (hex_print ? "true" : "false") << std::endl;
     return exit_code;
 }
 
@@ -107,22 +146,56 @@ void print_help(const po::options_description &options_description) {
     std::cout << "Usage:\n  mycat [-h|--help] [-A] <file1> <file2> ... <fileN>\n" << options_description << std::endl;
 }
 
-int writebuffer(int fd, const char *buffer, ssize_t size, int *status) {
+int write_buffer(int fd, const char *buffer, ssize_t size, int *status) {
     ssize_t written_bytes = 0;
     while (written_bytes < size) {
-        ssize_t written_now = write(fd, buffer + written_bytes,
-                                    size - written_bytes);
+        ssize_t written_now = write(fd, buffer + written_bytes, size - written_bytes);
         if (written_now == -1) {
             if (errno == EINTR)
                 continue;
             else {
                 *status = errno;
-                return -1;
+                return FAIL_CODE;
             }
         } else
             written_bytes += written_now;
     }
-    return 0;
+    return SUCCESS_CODE;
 }
 
-int readbuffer(int fd, const char *buffer, ssize_t size, int *status) { return 0; }
+ssize_t read_buffer(int fd, char *buffer, ssize_t size, int *status) {
+    ssize_t read_bytes = 0;
+    while (read_bytes < size) {
+        ssize_t read_now = read(fd, (void *) (buffer + read_bytes), size - read_bytes);
+        if (read_now == FAIL_CODE) {
+            if (errno == EINTR)
+                continue;
+            else {
+                *status = errno;
+                return FAIL_CODE;
+            }
+        } else if (read_now == 0) {
+//            buffer[read_bytes] = 0; TODO: check if adding '\0' to the buffer is needed
+            return read_bytes;
+        } else
+            read_bytes += read_now;
+    }
+//    buffer[read_bytes] = 0; TODO: check if adding '\0' to the buffer is needed
+    return read_bytes;
+}
+
+unsigned char num_to_hex_char(const unsigned char n) {
+    if (n < 10)
+        return '0' + n;
+    else if (n < 16)
+        return 'A' + (n - 10);
+    else
+        return '?';
+}
+
+void write_as_hex(char *buf, unsigned char c) {
+    buf[0] = '\\';
+    buf[1] = 'x';
+    buf[2] = static_cast<char>(num_to_hex_char(c >> 4u));
+    buf[3] = static_cast<char>(num_to_hex_char(c & 0x0fu));
+}
