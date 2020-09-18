@@ -1,39 +1,37 @@
 #include <iostream>
-#include <boost/program_options.hpp>
+#include <string>
+#include <vector>
 
-#include "operations/operations.hpp"
+#include <mycat_opts.h>
+#include <mycat.h>
+#include <mycat_hex.h>
+
 
 int main(int argc, char **argv) {
-    int variable_a, variable_b;
+    ucu::mycat_opts opts{};
 
-    namespace po = boost::program_options;
-
-    po::options_description visible("Supported options");
-    visible.add_options()
-            ("help,h", "Print this help message.");
-
-    po::options_description hidden("Hidden options");
-    hidden.add_options()
-            ("a", po::value<int>(&variable_a)->default_value(0), "Variable A.")
-            ("b", po::value<int>(&variable_b)->default_value(0), "Variable B.");
-
-    po::positional_options_description p;
-    p.add("a", 1);
-    p.add("b", 1);
-
-    po::options_description all("All options");
-    all.add(visible).add(hidden);
-
-    po::variables_map vm;
-    po::store(po::command_line_parser(argc, argv).options(all).positional(p).run(), vm);
-    po::notify(vm);
-
-    if (vm.count("help")) {
-        std::cout << "Usage:\n  add [a] [b]\n" << visible << std::endl;
+    try {
+        opts.parse(argc, argv);
+    } catch (const ucu::help_option_condition &e) {
+        std::cout << opts.get_help_msg() << std::endl;
         return EXIT_SUCCESS;
+    } catch (const std::exception &e) {
+        std::cout << opts.get_help_msg() << std::endl;
+        std::cerr << e.what() << std::endl;
+        return EXIT_FAILURE;
     }
 
-    int result = operations::add(variable_a, variable_b);
-    std::cout << result << std::endl;
+    try {
+        if (opts.get_hex_print_ind()) {
+            ucu::mycat_hex{opts}.run();
+        } else {
+            ucu::mycat{opts}.run();
+        }
+    } catch (const ucu::mycat_error &e) {
+        return EXIT_FAILURE;
+    }
+
     return EXIT_SUCCESS;
 }
+
+

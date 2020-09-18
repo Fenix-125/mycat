@@ -1,13 +1,13 @@
-# Lab 2 Option 3: Adder
+# Lab 2 Syscalls & File Input\Output: mycat
 
 ## Team
 
- - [Volodymyr Chernetskyi](https://github.com/chernetskyi)
+ - [Yuriy Pasichnyk](https://github.com/Fenix-125)
 
 ## Prerequisites
 
  - **C++ compiler** - needs to support **C++17** standard
- - **CMake** 3.15+
+ - **CMake** 3.``15+
  
 The rest prerequisites (such as development libraries) can be found in the [packages file](./apt_packages.txt) in the form of the apt package manager package names.
 
@@ -15,7 +15,7 @@ The rest prerequisites (such as development libraries) can be found in the [pack
 
 1. Clone the project.
     ```bash
-    git clone git@github.com:chernetskyi/cpp-template.git
+    git clone git@github.com:Fenix-125/mycat.git
     ```
 2. Install required libraries. On Ubuntu:
    ```bash
@@ -30,9 +30,7 @@ The rest prerequisites (such as development libraries) can be found in the [pack
 ## Usage
 
 ```bash
-add [a] [b]
+mycat [-h|--help] [-A] <file1> <file2> ... <fileN>
 ```
 
-If less than two numbers provided, zeroes are used instead. If more - an error occurs.
-
-Help flags `-h`/`--help` support is available.
+For more detail see help. Help flags: `-h`/`--help`.
